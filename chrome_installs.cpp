@@ -15,6 +15,8 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 HWND root, label1, label2, progress;
 intptr_t countResult;
 
+#define READ_ALIGNMENT (4096)
+
 #pragma pack(push,1)
 struct BootSector {
 	uint8_t	 jump[3]; 
@@ -40,6 +42,7 @@ struct BootSector {
 	uint32_t checksum;
 	uint8_t	 bootloader[426];
 	uint16_t bootSignature;
+	uint8_t  padding[READ_ALIGNMENT - 512];
 };
 
 struct FileRecordHeader {
@@ -124,7 +127,7 @@ HANDLE drive;
 BootSector bootSector;
 
 #define MFT_FILE_SIZE (1024)
-uint8_t mftFile[MFT_FILE_SIZE];
+uint8_t mftFile[READ_ALIGNMENT];
 
 #define MFT_FILES_PER_BUFFER (65536)
 uint8_t mftBuffer[MFT_FILES_PER_BUFFER * MFT_FILE_SIZE];
@@ -163,11 +166,11 @@ intptr_t GetCount() {
 		return -1;
 	}
 
-	Read(&bootSector, 0, 512);
+	Read(&bootSector, 0, sizeof(BootSector));
 
 	uint64_t bytesPerCluster = bootSector.bytesPerSector * bootSector.sectorsPerCluster;
 
-	Read(&mftFile, bootSector.mftStart * bytesPerCluster, MFT_FILE_SIZE);
+	Read(&mftFile, bootSector.mftStart * bytesPerCluster, sizeof(mftFile));
 
 	FileRecordHeader *fileRecord = (FileRecordHeader *) mftFile;
 	AttributeHeader *attribute = (AttributeHeader *) (mftFile + fileRecord->firstAttributeOffset);
@@ -217,7 +220,9 @@ intptr_t GetCount() {
 		while (filesRemaining) {
 			uint64_t filesToLoad = MFT_FILES_PER_BUFFER;
 			if (filesRemaining < MFT_FILES_PER_BUFFER) filesToLoad = filesRemaining;
-			Read(&mftBuffer, clusterNumber * bytesPerCluster + positionInBlock, filesToLoad * MFT_FILE_SIZE);
+			uint64_t loadSize = filesToLoad * MFT_FILE_SIZE;
+			loadSize = (loadSize + READ_ALIGNMENT - 1) & ~(READ_ALIGNMENT - 1);
+			Read(&mftBuffer, clusterNumber * bytesPerCluster + positionInBlock, loadSize);
 			positionInBlock += filesToLoad * MFT_FILE_SIZE;
 			filesRemaining -= filesToLoad;
 
